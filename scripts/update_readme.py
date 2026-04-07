@@ -193,9 +193,11 @@ def build_contributions_markdown(contributions: list[dict]) -> str:
 def fetch_trending(count: int) -> list[dict]:
     """
     Fetch the most-starred repos created in the last 7 days across all of GitHub.
-    This surfaces the newest, hottest projects people are sharing.
+    For each repo, also pulls the README snippet and topics for richer analysis.
     """
     from datetime import timedelta
+    import base64
+
     week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
 
     url = (
@@ -204,7 +206,7 @@ def fetch_trending(count: int) -> list[dict]:
         f"&sort=stars&order=desc&per_page={count}"
     )
     headers = build_headers()
-    headers["Accept"] = "application/vnd.github.mercy-preview+json"  # include topics
+    headers["Accept"] = "application/vnd.github.mercy-preview+json"
     req = urllib.request.Request(url, headers=headers)
 
     try:
@@ -214,106 +216,259 @@ def fetch_trending(count: int) -> list[dict]:
         print(f"Warning: Could not fetch trending repos ({e.code}). Skipping.")
         return []
 
-    return data.get("items", [])[:count]
+    repos = data.get("items", [])[:count]
+
+    # Enrich each repo with README content and topics
+    for repo in repos:
+        full_name = repo["full_name"]
+
+        # Fetch topics
+        try:
+            topic_url = f"{API_BASE}/repos/{full_name}/topics"
+            topic_headers = build_headers()
+            topic_headers["Accept"] = "application/vnd.github.mercy-preview+json"
+            req2 = urllib.request.Request(topic_url, headers=topic_headers)
+            with urllib.request.urlopen(req2) as resp:
+                topic_data = json.loads(resp.read().decode())
+                repo["topics"] = topic_data.get("names", [])
+        except Exception:
+            repo["topics"] = []
+
+        # Fetch README (first 500 chars for context)
+        try:
+            readme_url = f"{API_BASE}/repos/{full_name}/readme"
+            req3 = urllib.request.Request(readme_url, headers=build_headers())
+            with urllib.request.urlopen(req3) as resp:
+                readme_data = json.loads(resp.read().decode())
+                content = base64.b64decode(readme_data.get("content", "")).decode("utf-8", errors="ignore")
+                # Strip markdown headers/badges, keep first meaningful chunk
+                clean_lines = []
+                for line in content.split("\n"):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith(("#", "!", "[!", "<!--", "---", "[![", "<")):
+                        continue
+                    clean_lines.append(stripped)
+                    if len(" ".join(clean_lines)) > 500:
+                        break
+                repo["readme_snippet"] = " ".join(clean_lines)[:500]
+        except Exception:
+            repo["readme_snippet"] = ""
+
+    return repos
 
 
-def categorize_repo(repo: dict) -> str:
+def analyze_repo(repo: dict) -> dict:
     """
-    Generate a plain-English summary of what a repo is and why it matters,
-    written for a non-technical audience.
+    Analyze a repo using its description, topics, README, and metadata.
+    Returns a dict with category, summary, use_case, and popularity for non-technical readers.
     """
     name = repo.get("name", "").lower()
     desc = (repo.get("description") or "").lower()
     language = (repo.get("language") or "").lower()
     topics = [t.lower() for t in repo.get("topics", [])]
+    readme = repo.get("readme_snippet", "").lower()
     stars = repo.get("stargazers_count", 0)
-    combined = f"{name} {desc} {' '.join(topics)}"
+    forks = repo.get("forks_count", 0)
+    combined = f"{name} {desc} {' '.join(topics)} {readme}"
 
-    # Determine category
-    if any(w in combined for w in ["llm", "gpt", "ai", "machine learning", "ml", "neural", "chatbot", "openai", "claude", "gemini", "copilot", "agent"]):
-        category = "AI & Machine Learning"
-        what = "An artificial intelligence tool"
-    elif any(w in combined for w in ["web", "frontend", "react", "vue", "angular", "nextjs", "svelte", "tailwind", "css", "html"]):
-        category = "Web Development"
-        what = "A website-building tool"
-    elif any(w in combined for w in ["api", "backend", "server", "database", "sql", "graphql", "rest"]):
-        category = "Backend & APIs"
-        what = "A behind-the-scenes system tool"
-    elif any(w in combined for w in ["mobile", "ios", "android", "flutter", "react native", "swift", "kotlin"]):
-        category = "Mobile Apps"
-        what = "A mobile app tool"
-    elif any(w in combined for w in ["security", "auth", "encrypt", "vulnerability", "pentest"]):
-        category = "Security"
-        what = "A cybersecurity tool"
-    elif any(w in combined for w in ["devops", "docker", "kubernetes", "ci/cd", "deploy", "terraform", "cloud"]):
-        category = "Cloud & DevOps"
-        what = "A cloud infrastructure tool"
-    elif any(w in combined for w in ["data", "analytics", "visualization", "dashboard", "chart", "pandas"]):
-        category = "Data & Analytics"
-        what = "A data analysis tool"
-    elif any(w in combined for w in ["cli", "terminal", "command", "shell", "script", "automation"]):
-        category = "Automation & Tools"
-        what = "A productivity/automation tool"
-    elif any(w in combined for w in ["game", "engine", "unity", "godot"]):
-        category = "Gaming"
-        what = "A game development tool"
-    elif any(w in combined for w in ["education", "learn", "tutorial", "course", "awesome", "list", "resource"]):
-        category = "Learning & Resources"
-        what = "An educational resource"
+    # --- Category detection (multi-signal) ---
+    categories = {
+        "AI & Machine Learning": ["llm", "gpt", "ai ", "artificial intelligence", "machine learning",
+            "ml ", "neural", "chatbot", "openai", "claude", "gemini", "copilot", "agent",
+            "transformer", "diffusion", "stable diffusion", "langchain", "rag ", "embedding",
+            "fine-tun", "inference", "model", "deep learning", "nlp", "computer vision"],
+        "Web Development": ["web app", "frontend", "react", "vue", "angular", "nextjs", "next.js",
+            "svelte", "tailwind", "css", "html", "website", "landing page", "ui component",
+            "design system"],
+        "Backend & Infrastructure": ["api", "backend", "server", "database", "sql", "graphql",
+            "rest ", "microservice", "queue", "cache", "orm", "middleware"],
+        "Mobile Apps": ["mobile", "ios", "android", "flutter", "react native", "swift ui",
+            "kotlin", "app store"],
+        "Cybersecurity": ["security", "auth", "encrypt", "vulnerability", "pentest", "firewall",
+            "malware", "exploit", "zero-day", "cve", "threat"],
+        "Cloud & DevOps": ["devops", "docker", "kubernetes", "k8s", "ci/cd", "deploy", "terraform",
+            "cloud", "aws", "azure", "gcp", "infrastructure", "monitoring", "observability"],
+        "Data & Analytics": ["data", "analytics", "visualization", "dashboard", "chart", "pandas",
+            "etl", "pipeline", "warehouse", "bi ", "business intelligence", "report"],
+        "Automation & Productivity": ["cli", "terminal", "command line", "shell", "script",
+            "automation", "workflow", "bot", "scraper", "crawler"],
+        "Gaming": ["game", "engine", "unity", "godot", "unreal", "3d", "pixel", "sprite"],
+        "Learning & Resources": ["education", "learn", "tutorial", "course", "awesome",
+            "curated list", "resource", "guide", "cheatsheet", "interview"],
+        "Finance & Crypto": ["finance", "trading", "crypto", "blockchain", "defi", "wallet",
+            "payment", "invoice", "accounting"],
+    }
+
+    detected_category = "Software Tool"
+    max_hits = 0
+    for cat, keywords in categories.items():
+        hits = sum(1 for kw in keywords if kw in combined)
+        if hits > max_hits:
+            max_hits = hits
+            detected_category = cat
+
+    # --- Build plain-English summary from README + description ---
+    original_desc = repo.get("description") or ""
+    readme_text = repo.get("readme_snippet", "")
+
+    # Pick the best available description
+    if readme_text and len(readme_text) > len(original_desc):
+        # Use first sentence or two from README
+        sentences = readme_text.replace("\n", " ").split(". ")
+        summary = ". ".join(sentences[:2]).strip()
+        if not summary.endswith("."):
+            summary += "."
+        if len(summary) > 200:
+            summary = summary[:197] + "..."
+    elif original_desc:
+        summary = original_desc
+        if not summary.endswith("."):
+            summary += "."
     else:
-        category = "Developer Tool"
-        what = "A software development tool"
+        summary = "A new project gaining traction in the developer community."
 
-    # Popularity context
-    if stars >= 5000:
-        popularity = "Extremely popular — thousands of developers adopted it in days"
+    # --- Who is this for? ---
+    use_case_map = {
+        "AI & Machine Learning": "Useful for businesses exploring AI automation, content generation, or data-driven decision making",
+        "Web Development": "Useful for anyone building or improving a website or web application",
+        "Backend & Infrastructure": "Useful for teams building reliable, scalable online services",
+        "Mobile Apps": "Useful for anyone building smartphone or tablet applications",
+        "Cybersecurity": "Useful for protecting digital assets, data, and online systems",
+        "Cloud & DevOps": "Useful for teams managing servers, deployments, and cloud infrastructure",
+        "Data & Analytics": "Useful for turning raw data into insights, reports, and dashboards",
+        "Automation & Productivity": "Useful for automating repetitive tasks and saving time",
+        "Gaming": "Useful for game developers and interactive media creators",
+        "Learning & Resources": "Useful for anyone looking to learn new technical skills",
+        "Finance & Crypto": "Useful for financial applications, trading tools, or blockchain projects",
+        "Software Tool": "A general-purpose tool for developers and technical teams",
+    }
+    use_case = use_case_map.get(detected_category, use_case_map["Software Tool"])
+
+    # --- Popularity in context ---
+    if stars >= 10000:
+        popularity = f":fire::fire::fire: Viral — {stars:,} stars in under a week. This is a major moment in tech."
+    elif stars >= 5000:
+        popularity = f":fire::fire: Explosive growth — {stars:,} developers starred this in days"
     elif stars >= 1000:
-        popularity = "Very popular — gaining serious traction fast"
+        popularity = f":fire: Fast-growing — {stars:,} stars already, with {forks:,} people building on it"
     elif stars >= 500:
-        popularity = "Popular — catching the attention of the dev community"
+        popularity = f":chart_with_upwards_trend: Gaining traction — {stars:,} stars and climbing"
     elif stars >= 100:
-        popularity = "Growing — early buzz building around it"
+        popularity = f":seedling: Early buzz — {stars:,} developers watching this"
     else:
-        popularity = "New and emerging"
+        popularity = f":new: Just launched — {stars:,} early adopters"
 
-    return f"**{category}** · {what}. {popularity}."
+    # --- Topics as readable tags ---
+    readable_topics = ", ".join(topics[:5]) if topics else None
+
+    return {
+        "category": detected_category,
+        "summary": summary,
+        "use_case": use_case,
+        "popularity": popularity,
+        "topics": readable_topics,
+    }
 
 
 def build_trending_markdown(repos: list[dict]) -> str:
-    """Build the markdown table for trending repos across GitHub with plain-English summaries."""
+    """Build a compact top-3 summary for the README with a link to TRENDING.md."""
     if not repos:
         return "_Could not fetch trending repos._\n"
 
     lines = [
-        "| # | Project | What It Is (In Plain English) | Popularity | Language |",
-        "|:-:|:--------|:-----------------------------|:----------:|:--------:|",
+        "| # | Project | Category | Stars | Why It Matters |",
+        "|:-:|:--------|:---------|:-----:|:---------------|",
+    ]
+
+    for i, repo in enumerate(repos[:3], 1):
+        name = repo["full_name"]
+        url = repo["html_url"]
+        stars = repo.get("stargazers_count", 0)
+        analysis = analyze_repo(repo)
+
+        star_display = f":star: {stars:,}" if stars > 0 else "—"
+
+        lines.append(
+            f"| {i} | [**{name}**]({url}) | {analysis['category']} | {star_display} | {analysis['use_case']} |"
+        )
+
+    lines.append("")
+    lines.append(":point_right: **[See full analysis of all trending projects →](TRENDING.md)**")
+    lines.append("")
+    lines.append(f"> Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def build_trending_detail_file(repos: list[dict]) -> str:
+    """Build the full TRENDING.md with detailed analysis for each repo."""
+    lines = [
+        "# Trending on GitHub This Week",
+        "",
+        "_The hottest new projects from across GitHub, analysed in plain English._",
+        "",
+        f"_Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}_",
+        "",
+        "---",
+        "",
     ]
 
     for i, repo in enumerate(repos, 1):
         name = repo["full_name"]
         url = repo["html_url"]
-        description = (repo.get("description") or "_No description_").replace("|", "\\|")
+        original_desc = repo.get("description") or "_No description provided_"
         stars = repo.get("stargazers_count", 0)
-        language = repo.get("language")
+        forks = repo.get("forks_count", 0)
+        language = repo.get("language") or "Not specified"
+        created = repo.get("created_at", "")
+        analysis = analyze_repo(repo)
 
-        if len(description) > 60:
-            description = description[:57] + "..."
+        date_display = format_date(created) if created else "Unknown"
 
-        summary = categorize_repo(repo)
-        star_display = f":star: {stars:,}" if stars > 0 else "—"
-        lang_display = format_language(language) if language else "—"
+        lines.append(f"## {i}. [{name}]({url})")
+        lines.append("")
+        lines.append(f"> {original_desc}")
+        lines.append("")
+        lines.append(f"**Category:** {analysis['category']}")
+        lines.append(f"**Language:** {language} | **Stars:** :star: {stars:,} | **Forks:** {forks:,} | **Created:** {date_display}")
+        lines.append("")
+        lines.append(f"### What is this?")
+        lines.append("")
+        lines.append(analysis["summary"])
+        lines.append("")
+        lines.append(f"### Who is this useful for?")
+        lines.append("")
+        lines.append(f"{analysis['use_case']}.")
+        lines.append("")
+        lines.append(f"### Popularity")
+        lines.append("")
+        lines.append(analysis["popularity"])
+        lines.append("")
+        if analysis["topics"]:
+            lines.append(f"**Tags:** {analysis['topics']}")
+            lines.append("")
+        lines.append("---")
+        lines.append("")
 
-        lines.append(
-            f"| {i} | [**{name}**]({url}) | {description} | {star_display} | {lang_display} |"
-        )
-        lines.append(
-            f"| | | {summary} | | |"
-        )
-
+    lines.append("## What does this all mean?")
     lines.append("")
-    lines.append(f"> :bulb: **What does this mean?** These are the hottest brand-new projects developers worldwide are building and sharing right now. High star counts = lots of people find it useful.")
-    lines.append(f">")
-    lines.append(f"> Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
+    lines.append("These are the most-starred brand new projects on GitHub from the past 7 days. "
+                 "When a project gets thousands of stars in just a few days, it means developers "
+                 "worldwide are excited about it — they're bookmarking it, sharing it, and building "
+                 "with it. Think of stars like votes of confidence from the tech community.")
+    lines.append("")
+    lines.append("**How to read this:**")
+    lines.append("- **Stars** = how many people saved/endorsed the project (like bookmarks)")
+    lines.append("- **Forks** = how many people copied it to build their own version (shows real adoption)")
+    lines.append("- **Language** = what programming language it's written in")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"_This file is auto-generated and updates every hour. "
+                 f"[Back to profile →](README.md)_")
     lines.append("")
 
     return "\n".join(lines)
@@ -484,7 +639,7 @@ def main():
     contributions = fetch_contributions(args.username, count)
     print(f"Found {len(contributions)} contributed repositories.")
 
-    print("Fetching trending repos across GitHub...")
+    print("Fetching trending repos across GitHub (with README analysis)...")
     trending = fetch_trending(count)
     print(f"Found {len(trending)} trending repositories.")
 
@@ -492,6 +647,14 @@ def main():
     contributions_md = build_contributions_markdown(contributions)
     trending_md = build_trending_markdown(trending)
     update_readme(args.readme, projects_md, contributions_md, trending_md)
+
+    # Write detailed trending analysis to separate file
+    if trending:
+        trending_path = os.path.join(os.path.dirname(args.readme), "TRENDING.md")
+        detail_content = build_trending_detail_file(trending)
+        with open(trending_path, "w", encoding="utf-8") as f:
+            f.write(detail_content)
+        print(f"TRENDING.md written with detailed analysis of {len(trending)} repos.")
 
 
 if __name__ == "__main__":

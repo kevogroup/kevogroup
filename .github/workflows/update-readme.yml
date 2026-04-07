@@ -40,6 +40,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git diff --staged --quiet || git commit -m "docs: update latest projects section"
+          git add README.md TRENDING.md
+          git diff --staged --quiet || git commit -m "docs: update latest projects and trending analysis"
           git push
