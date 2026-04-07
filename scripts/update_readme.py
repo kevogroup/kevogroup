@@ -639,22 +639,9 @@ def main():
     contributions = fetch_contributions(args.username, count)
     print(f"Found {len(contributions)} contributed repositories.")
 
-    print("Fetching trending repos across GitHub (with README analysis)...")
-    trending = fetch_trending(count)
-    print(f"Found {len(trending)} trending repositories.")
-
     projects_md = build_markdown(repos)
     contributions_md = build_contributions_markdown(contributions)
-    trending_md = build_trending_markdown(trending)
-    update_readme(args.readme, projects_md, contributions_md, trending_md)
-
-    # Write detailed trending analysis to separate file
-    if trending:
-        trending_path = os.path.join(os.path.dirname(args.readme), "TRENDING.md")
-        detail_content = build_trending_detail_file(trending)
-        with open(trending_path, "w", encoding="utf-8") as f:
-            f.write(detail_content)
-        print(f"TRENDING.md written with detailed analysis of {len(trending)} repos.")
+    update_readme(args.readme, projects_md, contributions_md)
 
 
 if __name__ == "__main__":
