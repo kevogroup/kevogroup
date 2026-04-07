@@ -1,0 +1,45 @@
+name: Update Profile README
+
+on:
+  schedule:
+    - cron: "0 6 * * *"       # Every day at 6:00 AM UTC
+  workflow_dispatch:            # Manual trigger from Actions tab
+  push:
+    branches: [main]
+    paths:
+      - "scripts/update_readme.py"
+      - ".github/workflows/update-readme.yml"
+
+concurrency:
+  group: update-readme
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Update README with latest repos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME: "kevogroup"
+          REPO_COUNT: "5"
+        run: python scripts/update_readme.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet || git commit -m "docs: update latest projects section"
+          git push
