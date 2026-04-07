@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 
 START_TAG = "<!-- LATEST-PROJECTS:START -->"
 END_TAG = "<!-- LATEST-PROJECTS:END -->"
+CONTRIB_START_TAG = "<!-- CONTRIBUTIONS:START -->"
+CONTRIB_END_TAG = "<!-- CONTRIBUTIONS:END -->"
 DEFAULT_COUNT = 5
 MAX_COUNT = 10
 API_BASE = "https://api.github.com"
@@ -92,6 +94,98 @@ def fetch_repos(username: str, count: int) -> list[dict]:
         page += 1
 
     return repos[:count]
+
+
+def fetch_contributions(username: str, count: int) -> list[dict]:
+    """
+    Fetch repositories the user has contributed to (via merged pull requests)
+    that they don't own. Uses the GitHub Search API.
+    """
+    url = (
+        f"{API_BASE}/search/issues"
+        f"?q=author:{username}+type:pr+is:merged+-user:{username}"
+        f"&sort=updated&order=desc&per_page={count * 3}"
+    )
+    req = urllib.request.Request(url, headers=build_headers())
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+    except urllib.error.HTTPError as e:
+        print(f"Warning: Could not fetch contributions ({e.code}). Skipping.")
+        return []
+
+    # Deduplicate by repo — we only want one entry per repo
+    seen_repos = set()
+    contributions = []
+
+    for item in data.get("items", []):
+        repo_url = item.get("repository_url", "")
+        if repo_url in seen_repos:
+            continue
+        seen_repos.add(repo_url)
+
+        # Fetch repo details for language/stars
+        req2 = urllib.request.Request(repo_url, headers=build_headers())
+        try:
+            with urllib.request.urlopen(req2) as resp:
+                repo = json.loads(resp.read().decode())
+        except urllib.error.HTTPError:
+            continue
+
+        contributions.append({
+            "name": repo["full_name"],
+            "html_url": repo["html_url"],
+            "description": repo.get("description"),
+            "stargazers_count": repo.get("stargazers_count", 0),
+            "language": repo.get("language"),
+            "pr_title": item.get("title", ""),
+            "pr_url": item.get("html_url", ""),
+            "updated_at": item.get("closed_at") or item.get("updated_at", ""),
+        })
+
+        if len(contributions) >= count:
+            break
+
+    return contributions
+
+
+def build_contributions_markdown(contributions: list[dict]) -> str:
+    """Build the markdown table for the contributions section."""
+    if not contributions:
+        return "_No contributions to external repositories found yet._\n"
+
+    lines = [
+        "| Repository | Contribution | Stars | Language | Date |",
+        "|:-----------|:-------------|:-----:|:--------:|:----:|",
+    ]
+
+    for c in contributions:
+        name = c["name"]
+        url = c["html_url"]
+        pr_title = (c.get("pr_title") or "Contribution").replace("|", "\\|")
+        if len(pr_title) > 60:
+            pr_title = pr_title[:57] + "..."
+        pr_url = c.get("pr_url", "")
+        stars = c.get("stargazers_count", 0)
+        language = c.get("language")
+        updated = c.get("updated_at", "")
+
+        star_display = f":star: {stars}" if stars > 0 else "—"
+        lang_display = format_language(language) if language else "—"
+        date_display = format_date(updated) if updated else "—"
+
+        pr_link = f"[{pr_title}]({pr_url})" if pr_url else pr_title
+
+        lines.append(
+            f"| [**{name}**]({url}) | {pr_link} | {star_display} | {lang_display} | {date_display} |"
+        )
+
+    lines.append("")
+    lines.append(f"> Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
+    lines.append("")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -169,9 +263,22 @@ def build_markdown(repos: list[dict]) -> str:
 # README update logic
 # ---------------------------------------------------------------------------
 
-def update_readme(readme_path: str, new_content: str) -> bool:
+def update_section(content: str, start_tag: str, end_tag: str, new_content: str) -> str:
+    """Replace content between start_tag and end_tag. Returns updated string."""
+    if start_tag not in content or end_tag not in content:
+        return content  # tags not present, skip
+
+    replacement = f"{start_tag}\n{new_content}{end_tag}"
+    pattern = re.compile(
+        re.escape(start_tag) + r".*?" + re.escape(end_tag),
+        re.DOTALL,
+    )
+    return pattern.sub(replacement, content)
+
+
+def update_readme(readme_path: str, projects_md: str, contributions_md: str | None = None) -> bool:
     """
-    Replace content between START_TAG and END_TAG in the README.
+    Replace content between tag pairs in the README.
     Returns True if the file was modified, False otherwise.
     """
     if not os.path.exists(readme_path):
@@ -181,23 +288,14 @@ def update_readme(readme_path: str, new_content: str) -> bool:
     with open(readme_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Check that both tags exist
     if START_TAG not in content or END_TAG not in content:
-        print(f"Error: Could not find update tags in {readme_path}.")
-        print(f"  Make sure your README contains:")
-        print(f"    {START_TAG}")
-        print(f"    {END_TAG}")
+        print(f"Error: Could not find project tags in {readme_path}.")
         sys.exit(1)
 
-    # Build the replacement block
-    replacement = f"{START_TAG}\n{new_content}{END_TAG}"
+    new_readme = update_section(content, START_TAG, END_TAG, projects_md)
 
-    # Use regex to replace everything between (and including) the tags
-    pattern = re.compile(
-        re.escape(START_TAG) + r".*?" + re.escape(END_TAG),
-        re.DOTALL,
-    )
-    new_readme = pattern.sub(replacement, content)
+    if contributions_md is not None:
+        new_readme = update_section(new_readme, CONTRIB_START_TAG, CONTRIB_END_TAG, contributions_md)
 
     if new_readme == content:
         print("README is already up to date — no changes needed.")
@@ -248,8 +346,13 @@ def main():
     repos = fetch_repos(args.username, count)
     print(f"Found {len(repos)} repositories.")
 
-    markdown = build_markdown(repos)
-    update_readme(args.readme, markdown)
+    print(f"Fetching recent contributions for @{args.username}...")
+    contributions = fetch_contributions(args.username, count)
+    print(f"Found {len(contributions)} contributed repositories.")
+
+    projects_md = build_markdown(repos)
+    contributions_md = build_contributions_markdown(contributions)
+    update_readme(args.readme, projects_md, contributions_md)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,12 @@ I'm a developer who loves building things that make a difference.
 > Last updated: April 07, 2026 at 12:49 UTC
 <!-- LATEST-PROJECTS:END -->
 
+## Recent Contributions
+
+<!-- CONTRIBUTIONS:START -->
+_This section updates automatically every day via GitHub Actions._
+<!-- CONTRIBUTIONS:END -->
+
 ## GitHub Stats
 
 ![GitHub Stats](https://github-readme-stats.vercel.app/api?username=kevogroup&show_icons=true&theme=default&hide_border=true&count_private=true)
