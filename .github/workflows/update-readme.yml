@@ -2,7 +2,7 @@ name: Update Profile README
 
 on:
   schedule:
-    - cron: "0 13 * * *"      # Every day at 1:00 PM UTC (2:00 PM UK time)
+    - cron: "0 * * * *"        # Every hour
   workflow_dispatch:            # Manual trigger from Actions tab
   push:
     branches: [main]
