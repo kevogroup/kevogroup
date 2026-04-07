@@ -203,7 +203,9 @@ def fetch_trending(count: int) -> list[dict]:
         f"?q=created:>={week_ago}+stars:>=10"
         f"&sort=stars&order=desc&per_page={count}"
     )
-    req = urllib.request.Request(url, headers=build_headers())
+    headers = build_headers()
+    headers["Accept"] = "application/vnd.github.mercy-preview+json"  # include topics
+    req = urllib.request.Request(url, headers=headers)
 
     try:
         with urllib.request.urlopen(req) as response:
@@ -215,14 +217,76 @@ def fetch_trending(count: int) -> list[dict]:
     return data.get("items", [])[:count]
 
 
+def categorize_repo(repo: dict) -> str:
+    """
+    Generate a plain-English summary of what a repo is and why it matters,
+    written for a non-technical audience.
+    """
+    name = repo.get("name", "").lower()
+    desc = (repo.get("description") or "").lower()
+    language = (repo.get("language") or "").lower()
+    topics = [t.lower() for t in repo.get("topics", [])]
+    stars = repo.get("stargazers_count", 0)
+    combined = f"{name} {desc} {' '.join(topics)}"
+
+    # Determine category
+    if any(w in combined for w in ["llm", "gpt", "ai", "machine learning", "ml", "neural", "chatbot", "openai", "claude", "gemini", "copilot", "agent"]):
+        category = "AI & Machine Learning"
+        what = "An artificial intelligence tool"
+    elif any(w in combined for w in ["web", "frontend", "react", "vue", "angular", "nextjs", "svelte", "tailwind", "css", "html"]):
+        category = "Web Development"
+        what = "A website-building tool"
+    elif any(w in combined for w in ["api", "backend", "server", "database", "sql", "graphql", "rest"]):
+        category = "Backend & APIs"
+        what = "A behind-the-scenes system tool"
+    elif any(w in combined for w in ["mobile", "ios", "android", "flutter", "react native", "swift", "kotlin"]):
+        category = "Mobile Apps"
+        what = "A mobile app tool"
+    elif any(w in combined for w in ["security", "auth", "encrypt", "vulnerability", "pentest"]):
+        category = "Security"
+        what = "A cybersecurity tool"
+    elif any(w in combined for w in ["devops", "docker", "kubernetes", "ci/cd", "deploy", "terraform", "cloud"]):
+        category = "Cloud & DevOps"
+        what = "A cloud infrastructure tool"
+    elif any(w in combined for w in ["data", "analytics", "visualization", "dashboard", "chart", "pandas"]):
+        category = "Data & Analytics"
+        what = "A data analysis tool"
+    elif any(w in combined for w in ["cli", "terminal", "command", "shell", "script", "automation"]):
+        category = "Automation & Tools"
+        what = "A productivity/automation tool"
+    elif any(w in combined for w in ["game", "engine", "unity", "godot"]):
+        category = "Gaming"
+        what = "A game development tool"
+    elif any(w in combined for w in ["education", "learn", "tutorial", "course", "awesome", "list", "resource"]):
+        category = "Learning & Resources"
+        what = "An educational resource"
+    else:
+        category = "Developer Tool"
+        what = "A software development tool"
+
+    # Popularity context
+    if stars >= 5000:
+        popularity = "Extremely popular — thousands of developers adopted it in days"
+    elif stars >= 1000:
+        popularity = "Very popular — gaining serious traction fast"
+    elif stars >= 500:
+        popularity = "Popular — catching the attention of the dev community"
+    elif stars >= 100:
+        popularity = "Growing — early buzz building around it"
+    else:
+        popularity = "New and emerging"
+
+    return f"**{category}** · {what}. {popularity}."
+
+
 def build_trending_markdown(repos: list[dict]) -> str:
-    """Build the markdown table for trending repos across GitHub."""
+    """Build the markdown table for trending repos across GitHub with plain-English summaries."""
     if not repos:
         return "_Could not fetch trending repos._\n"
 
     lines = [
-        "| # | Repository | Description | Stars | Language | Created |",
-        "|:-:|:-----------|:------------|:-----:|:--------:|:-------:|",
+        "| # | Project | What It Is (In Plain English) | Popularity | Language |",
+        "|:-:|:--------|:-----------------------------|:----------:|:--------:|",
     ]
 
     for i, repo in enumerate(repos, 1):
@@ -231,21 +295,25 @@ def build_trending_markdown(repos: list[dict]) -> str:
         description = (repo.get("description") or "_No description_").replace("|", "\\|")
         stars = repo.get("stargazers_count", 0)
         language = repo.get("language")
-        created = repo.get("created_at", "")
 
-        if len(description) > 70:
-            description = description[:67] + "..."
+        if len(description) > 60:
+            description = description[:57] + "..."
 
+        summary = categorize_repo(repo)
         star_display = f":star: {stars:,}" if stars > 0 else "—"
         lang_display = format_language(language) if language else "—"
-        date_display = format_date(created) if created else "—"
 
         lines.append(
-            f"| {i} | [**{name}**]({url}) | {description} | {star_display} | {lang_display} | {date_display} |"
+            f"| {i} | [**{name}**]({url}) | {description} | {star_display} | {lang_display} |"
+        )
+        lines.append(
+            f"| | | {summary} | | |"
         )
 
     lines.append("")
-    lines.append(f"> Showing the most-starred new repos from the past 7 days · Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
+    lines.append(f"> :bulb: **What does this mean?** These are the hottest brand-new projects developers worldwide are building and sharing right now. High star counts = lots of people find it useful.")
+    lines.append(f">")
+    lines.append(f"> Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
     lines.append("")
 
     return "\n".join(lines)
