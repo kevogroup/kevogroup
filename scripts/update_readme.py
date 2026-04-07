@@ -28,6 +28,8 @@ START_TAG = "<!-- LATEST-PROJECTS:START -->"
 END_TAG = "<!-- LATEST-PROJECTS:END -->"
 CONTRIB_START_TAG = "<!-- CONTRIBUTIONS:START -->"
 CONTRIB_END_TAG = "<!-- CONTRIBUTIONS:END -->"
+TRENDING_START_TAG = "<!-- TRENDING:START -->"
+TRENDING_END_TAG = "<!-- TRENDING:END -->"
 DEFAULT_COUNT = 5
 MAX_COUNT = 10
 API_BASE = "https://api.github.com"
@@ -188,6 +190,67 @@ def build_contributions_markdown(contributions: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def fetch_trending(count: int) -> list[dict]:
+    """
+    Fetch the most-starred repos created in the last 7 days across all of GitHub.
+    This surfaces the newest, hottest projects people are sharing.
+    """
+    from datetime import timedelta
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    url = (
+        f"{API_BASE}/search/repositories"
+        f"?q=created:>={week_ago}+stars:>=10"
+        f"&sort=stars&order=desc&per_page={count}"
+    )
+    req = urllib.request.Request(url, headers=build_headers())
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+    except urllib.error.HTTPError as e:
+        print(f"Warning: Could not fetch trending repos ({e.code}). Skipping.")
+        return []
+
+    return data.get("items", [])[:count]
+
+
+def build_trending_markdown(repos: list[dict]) -> str:
+    """Build the markdown table for trending repos across GitHub."""
+    if not repos:
+        return "_Could not fetch trending repos._\n"
+
+    lines = [
+        "| # | Repository | Description | Stars | Language | Created |",
+        "|:-:|:-----------|:------------|:-----:|:--------:|:-------:|",
+    ]
+
+    for i, repo in enumerate(repos, 1):
+        name = repo["full_name"]
+        url = repo["html_url"]
+        description = (repo.get("description") or "_No description_").replace("|", "\\|")
+        stars = repo.get("stargazers_count", 0)
+        language = repo.get("language")
+        created = repo.get("created_at", "")
+
+        if len(description) > 70:
+            description = description[:67] + "..."
+
+        star_display = f":star: {stars:,}" if stars > 0 else "—"
+        lang_display = format_language(language) if language else "—"
+        date_display = format_date(created) if created else "—"
+
+        lines.append(
+            f"| {i} | [**{name}**]({url}) | {description} | {star_display} | {lang_display} | {date_display} |"
+        )
+
+    lines.append("")
+    lines.append(f"> Showing the most-starred new repos from the past 7 days · Last updated: {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Markdown formatting
 # ---------------------------------------------------------------------------
@@ -276,7 +339,7 @@ def update_section(content: str, start_tag: str, end_tag: str, new_content: str)
     return pattern.sub(replacement, content)
 
 
-def update_readme(readme_path: str, projects_md: str, contributions_md: str | None = None) -> bool:
+def update_readme(readme_path: str, projects_md: str, contributions_md: str | None = None, trending_md: str | None = None) -> bool:
     """
     Replace content between tag pairs in the README.
     Returns True if the file was modified, False otherwise.
@@ -296,6 +359,9 @@ def update_readme(readme_path: str, projects_md: str, contributions_md: str | No
 
     if contributions_md is not None:
         new_readme = update_section(new_readme, CONTRIB_START_TAG, CONTRIB_END_TAG, contributions_md)
+
+    if trending_md is not None:
+        new_readme = update_section(new_readme, TRENDING_START_TAG, TRENDING_END_TAG, trending_md)
 
     if new_readme == content:
         print("README is already up to date — no changes needed.")
@@ -350,9 +416,14 @@ def main():
     contributions = fetch_contributions(args.username, count)
     print(f"Found {len(contributions)} contributed repositories.")
 
+    print("Fetching trending repos across GitHub...")
+    trending = fetch_trending(count)
+    print(f"Found {len(trending)} trending repositories.")
+
     projects_md = build_markdown(repos)
     contributions_md = build_contributions_markdown(contributions)
-    update_readme(args.readme, projects_md, contributions_md)
+    trending_md = build_trending_markdown(trending)
+    update_readme(args.readme, projects_md, contributions_md, trending_md)
 
 
 if __name__ == "__main__":

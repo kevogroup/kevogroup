@@ -34,6 +34,14 @@ I'm a developer who loves building things that make a difference.
 _No contributions to external repositories found yet._
 <!-- CONTRIBUTIONS:END -->
 
+## Trending on GitHub
+
+_The hottest new projects from across GitHub this week._
+
+<!-- TRENDING:START -->
+_This section updates automatically every day via GitHub Actions._
+<!-- TRENDING:END -->
+
 ## GitHub Stats
 
 ![GitHub Stats](https://github-readme-stats.vercel.app/api?username=kevogroup&show_icons=true&theme=default&hide_border=true&count_private=true)
