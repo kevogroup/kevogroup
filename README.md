@@ -25,7 +25,7 @@ I'm a developer who loves building things that make a difference.
 |:-----------|:------------|:-----:|:--------:|:-------:|
 | [**kevogroup**](https://github.com/kevogroup/kevogroup) | My GitHub profile README | — | ![Python](https://img.shields.io/badge/-Python-3572A5?style=flat-square&logo=python&logoColor=white) | Apr 07, 2026 |
 
-> Last updated: April 07, 2026 at 12:54 UTC
+> Last updated: April 07, 2026 at 13:01 UTC
 <!-- LATEST-PROJECTS:END -->
 
 ## Recent Contributions
@@ -39,7 +39,15 @@ _No contributions to external repositories found yet._
 _The hottest new projects from across GitHub this week._
 
 <!-- TRENDING:START -->
-_This section updates automatically every day via GitHub Actions._
+| # | Repository | Description | Stars | Language | Created |
+|:-:|:-----------|:------------|:-----:|:--------:|:-------:|
+| 1 | [**ultraworkers/claw-code**](https://github.com/ultraworkers/claw-code) | The repo is finally unlocked. enjoy the party! The fastest repo in ... | :star: 175,559 | ![Rust](https://img.shields.io/badge/-Rust-dea584?style=flat-square&logo=rust&logoColor=white) | Mar 31, 2026 |
+| 2 | [**VoltAgent/awesome-design-md**](https://github.com/VoltAgent/awesome-design-md) | Collection of DESIGN.md files that capture design systems from popu... | :star: 27,484 | ![HTML](https://img.shields.io/badge/-HTML-e34c26?style=flat-square&logo=html&logoColor=white) | Mar 31, 2026 |
+| 3 | [**Gitlawb/openclaude**](https://github.com/Gitlawb/openclaude) | Open Claude Is Open-source coding-agent CLI for OpenAI, Gemini, Dee... | :star: 18,562 | ![TypeScript](https://img.shields.io/badge/-TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white) | Apr 01, 2026 |
+| 4 | [**claude-code-best/claude-code**](https://github.com/claude-code-best/claude-code) | 原汁原昧 Claude Code 可运行,可构建, 可调试版; Typescript 类型全修复; 企业级可靠性; 安全无毒, loc... | :star: 14,519 | ![TypeScript](https://img.shields.io/badge/-TypeScript-3178c6?style=flat-square&logo=typescript&logoColor=white) | Mar 31, 2026 |
+| 5 | [**santifer/career-ops**](https://github.com/santifer/career-ops) | AI-powered job search system built on Claude Code. 14 skill modes, ... | :star: 14,504 | ![JavaScript](https://img.shields.io/badge/-JavaScript-f1e05a?style=flat-square&logo=javascript&logoColor=white) | Apr 04, 2026 |
+
+> Showing the most-starred new repos from the past 7 days · Last updated: April 07, 2026 at 13:01 UTC
 <!-- TRENDING:END -->
 
 ## GitHub Stats
